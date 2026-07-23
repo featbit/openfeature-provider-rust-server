@@ -1,0 +1,47 @@
+[package]
+name = "featbit-openfeature-provider"
+version = "0.1.0-beta.1"
+edition = "2021"
+rust-version = "1.95.0"
+authors = ["FeatBit"]
+description = "OpenFeature provider for the FeatBit Rust server SDK"
+license = "Apache-2.0"
+repository = "https://github.com/featbit/openfeature-provider-rust-server"
+homepage = "https://www.featbit.co"
+readme = "README.md"
+keywords = ["featbit", "feature-flags", "openfeature", "provider"]
+categories = ["api-bindings", "web-programming"]
+
+[[example]]
+name = "cloud_axum_extreme"
+path = "examples/test/cloud_axum_extreme.rs"
+
+[dependencies]
+featbit-server-sdk = "0.1.0-beta.2"
+log = "0.4"
+# open-feature 0.3.0 references its log and mock exports unconditionally, so its default features
+# cannot currently be disabled even though this provider does not use the mock API at runtime.
+open-feature = "0.3.0"
+serde_json = "1"
+time = { version = "0.3", features = ["formatting"] }
+
+[dev-dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "tracing"] }
+env_logger = "0.11"
+featbit-server-sdk-opentelemetry = "0.1.0-beta.2"
+opentelemetry = { version = "0.32", default-features = false, features = ["logs"] }
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower-http = { version = "0.7", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
