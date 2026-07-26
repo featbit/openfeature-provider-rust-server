@@ -1,10 +1,14 @@
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+use std::thread;
 
 use open_feature::provider::FeatureProvider;
 use time::OffsetDateTime;
 
 use super::*;
-use featbit_server_sdk::{EvaluationObservation, EvaluationObserver, FbOptionsBuilder};
+use featbit_server_sdk::{
+    EvaluationObservation, EvaluationObserver, FbEvaluationEvent, FbOptionsBuilder,
+};
 
 const BOOTSTRAP: &str = r#"{
         "messageType":"data-sync",
@@ -48,6 +52,119 @@ fn provider() -> FeatBitProvider {
 fn provider_is_send_and_sync() {
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<FeatBitProvider>();
+}
+
+#[test]
+fn concurrent_evaluation_and_close_are_thread_safe() {
+    const WORKERS: usize = 8;
+    const PRE_CLOSE_EVALUATIONS: usize = 100;
+    const RACING_EVALUATIONS: usize = 1_000;
+    const POST_CLOSE_EVALUATIONS: usize = 100;
+
+    let provider = Arc::new(provider());
+    let begin_close = Arc::new(Barrier::new(WORKERS + 1));
+    let close_complete = Arc::new(Barrier::new(WORKERS + 1));
+    let successful = Arc::new(AtomicUsize::new(0));
+    let not_ready = Arc::new(AtomicUsize::new(0));
+
+    thread::scope(|scope| {
+        for worker in 0..WORKERS {
+            let provider = Arc::clone(&provider);
+            let begin_close = Arc::clone(&begin_close);
+            let close_complete = Arc::clone(&close_complete);
+            let successful = Arc::clone(&successful);
+            let not_ready = Arc::clone(&not_ready);
+            scope.spawn(move || {
+                let context = EvaluationContext::default()
+                    .with_targeting_key(format!("worker-{worker}"))
+                    .with_custom_field(
+                        "worker",
+                        i64::try_from(worker).expect("worker fits in i64"),
+                    );
+
+                for _ in 0..PRE_CLOSE_EVALUATIONS {
+                    assert_successful_resolution(&provider, &context);
+                    successful.fetch_add(1, Ordering::Relaxed);
+                }
+
+                begin_close.wait();
+                for _ in 0..RACING_EVALUATIONS {
+                    record_resolution_outcome(&provider, &context, &successful, &not_ready);
+                }
+
+                close_complete.wait();
+                for _ in 0..POST_CLOSE_EVALUATIONS {
+                    let error = resolve_enabled(&provider, &context)
+                        .expect_err("a closed provider must reject evaluation");
+                    assert_eq!(error.code, EvaluationErrorCode::ProviderNotReady);
+                    not_ready.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+        }
+
+        begin_close.wait();
+        provider.client().close();
+        close_complete.wait();
+    });
+
+    let expected = WORKERS * (PRE_CLOSE_EVALUATIONS + RACING_EVALUATIONS + POST_CLOSE_EVALUATIONS);
+    assert_eq!(
+        successful.load(Ordering::Relaxed) + not_ready.load(Ordering::Relaxed),
+        expected
+    );
+    assert!(
+        successful.load(Ordering::Relaxed) >= WORKERS * PRE_CLOSE_EVALUATIONS,
+        "every pre-close evaluation should succeed"
+    );
+    assert!(
+        not_ready.load(Ordering::Relaxed) >= WORKERS * POST_CLOSE_EVALUATIONS,
+        "every post-close evaluation should return ProviderNotReady"
+    );
+
+    let context = EvaluationContext::default().with_targeting_key("closed-user");
+    assert_eq!(
+        provider.track_metric_event(&context, "post-close", 1.0),
+        Ok(false)
+    );
+}
+
+fn resolve_enabled(
+    provider: &FeatBitProvider,
+    context: &EvaluationContext,
+) -> EvaluationResult<ResolutionDetails<bool>> {
+    provider.resolve("enabled", context, |value| {
+        if value.eq_ignore_ascii_case("true") {
+            Ok(true)
+        } else if value.eq_ignore_ascii_case("false") {
+            Ok(false)
+        } else {
+            Err(EvaluationErrorCode::TypeMismatch)
+        }
+    })
+}
+
+fn assert_successful_resolution(provider: &FeatBitProvider, context: &EvaluationContext) {
+    let details = resolve_enabled(provider, context).expect("ready provider should resolve");
+    assert!(details.value);
+    assert_eq!(details.variant.as_deref(), Some("on"));
+}
+
+fn record_resolution_outcome(
+    provider: &FeatBitProvider,
+    context: &EvaluationContext,
+    successful: &AtomicUsize,
+    not_ready: &AtomicUsize,
+) {
+    match resolve_enabled(provider, context) {
+        Ok(details) => {
+            assert!(details.value);
+            successful.fetch_add(1, Ordering::Relaxed);
+        }
+        Err(error) if error.code == EvaluationErrorCode::ProviderNotReady => {
+            not_ready.fetch_add(1, Ordering::Relaxed);
+        }
+        Err(error) => panic!("unexpected concurrent evaluation error: {error:?}"),
+    }
 }
 
 #[test]
@@ -136,6 +253,14 @@ fn open_feature_context_maps_primitive_datetime_and_supported_struct_fields() {
     struct Unsupported;
 
     let timestamp = OffsetDateTime::from_unix_timestamp(0).expect("Unix epoch should be valid");
+    let mut open_feature_profile = StructValue::default();
+    open_feature_profile
+        .fields
+        .insert("enabled".to_owned(), Value::Bool(true));
+    open_feature_profile.fields.insert(
+        "roles".to_owned(),
+        Value::Array(vec![Value::String("admin".to_owned())]),
+    );
     let context = EvaluationContext::default()
         .with_targeting_key("user-1")
         .with_custom_field("name", "Ada")
@@ -146,6 +271,10 @@ fn open_feature_context_maps_primitive_datetime_and_supported_struct_fields() {
         .with_custom_field(
             "profile",
             EvaluationContextFieldValue::new_struct(serde_json::json!({"b":2,"a":1})),
+        )
+        .with_custom_field(
+            "open_feature_profile",
+            EvaluationContextFieldValue::new_struct(open_feature_profile),
         )
         .with_custom_field(
             "unsupported",
@@ -169,6 +298,12 @@ fn open_feature_context_maps_primitive_datetime_and_supported_struct_fields() {
     assert_eq!(
         user.custom().get("profile").map(String::as_str),
         Some(r#"{"a":1,"b":2}"#)
+    );
+    assert_eq!(
+        user.custom()
+            .get("open_feature_profile")
+            .map(String::as_str),
+        Some(r#"{"enabled":true,"roles":["admin"]}"#)
     );
     assert!(!user.custom().contains_key("unsupported"));
     assert!(!user.custom().contains_key("non_finite"));
@@ -210,6 +345,7 @@ fn recursive_struct_conversion_accepts_supported_shapes_and_rejects_null() {
     ));
 
     assert!(json_to_struct(&serde_json::json!([1, 2])).is_none());
+    assert!(json_to_struct(&serde_json::Value::Null).is_none());
     assert!(json_to_struct(&serde_json::json!({"unsupported": null})).is_none());
 }
 
@@ -343,6 +479,14 @@ async fn observer_records_open_feature_context_and_conversion_errors() {
 fn provider_tracking_extensions_use_open_feature_context_validation() {
     let provider = provider();
     let missing_context = EvaluationContext::default();
+    let retained_event = FbEvaluationEvent::new("enabled", "on", "true", false);
+    let retained_error = provider
+        .track_eval_event(&missing_context, &retained_event)
+        .expect_err("retained evaluation tracking requires a targeting key");
+    assert_eq!(
+        retained_error.code,
+        EvaluationErrorCode::TargetingKeyMissing
+    );
     let evaluation_error = provider
         .track_eval_event_for_flag(&missing_context, "enabled")
         .expect_err("manual evaluation tracking requires a targeting key");
@@ -356,6 +500,11 @@ fn provider_tracking_extensions_use_open_feature_context_validation() {
     assert_eq!(metric_error.code, EvaluationErrorCode::TargetingKeyMissing);
 
     let context = EvaluationContext::default().with_targeting_key("user-1");
+    assert_eq!(
+        provider.track_eval_event(&context, &retained_event),
+        Ok(false),
+        "offline mode does not start FeatBit event delivery"
+    );
     assert_eq!(
         provider.track_eval_event_for_flag(&context, "enabled"),
         Ok(false),
@@ -468,6 +617,19 @@ async fn closed_provider_reports_error_and_rejects_resolution() {
     assert_eq!(provider.status(), ProviderStatus::Error);
 
     let context = EvaluationContext::default().with_targeting_key("user-1");
+    let retained_event = FbEvaluationEvent::new("enabled", "on", "true", false);
+    assert_eq!(
+        provider.track_eval_event(&context, &retained_event),
+        Ok(false)
+    );
+    assert_eq!(
+        provider.track_eval_event_for_flag(&context, "enabled"),
+        Ok(false)
+    );
+    assert_eq!(
+        provider.track_metric_event(&context, "checkout-completed", 1.0),
+        Ok(false)
+    );
     let error = provider
         .resolve_bool_value("enabled", &context)
         .await

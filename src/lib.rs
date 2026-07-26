@@ -15,7 +15,8 @@ use open_feature::{
 
 use featbit_server_sdk::{
     ClientStatus, EvaluationError as FbEvaluationError, EvaluationObservationError,
-    EvaluationReason as FbEvaluationReason, FbClient, FbOptions, FbUser, RawEvaluation,
+    EvaluationReason as FbEvaluationReason, FbClient, FbEvaluationEvent, FbOptions, FbUser,
+    RawEvaluation,
 };
 
 /// `FeatBit`'s direct implementation of the official `OpenFeature` Rust provider interface.
@@ -49,6 +50,31 @@ impl FeatBitProvider {
     #[must_use]
     pub const fn client(&self) -> &FbClient {
         &self.client
+    }
+
+    /// Records an immutable `FeatBit` evaluation event for an `OpenFeature` context.
+    ///
+    /// `OpenFeature` 0.3 details cannot carry the [`FbEvaluationEvent`] captured by a direct
+    /// [`FbClient`] detail evaluation. This extension preserves that exact variation and experiment
+    /// decision while applying the provider's normal context mapping. Configure
+    /// [`featbit_server_sdk::FbOptionsBuilder::disable_events`] with `(true, true)` when the
+    /// application controls exposure tracking; otherwise recording a retained event after a direct
+    /// detail evaluation can create a duplicate automatic event.
+    ///
+    /// The call never waits for network I/O and returns `Ok(false)` when delivery is unavailable or
+    /// the bounded queue rejects the event.
+    ///
+    /// # Errors
+    ///
+    /// Returns the standard `OpenFeature` targeting-key error when `evaluation_context` has no
+    /// non-empty targeting key.
+    pub fn track_eval_event(
+        &self,
+        evaluation_context: &EvaluationContext,
+        event: &FbEvaluationEvent,
+    ) -> EvaluationResult<bool> {
+        let user = user_from_context(evaluation_context)?;
+        Ok(self.client.track_eval_event(&user, event))
     }
 
     /// Re-evaluates `flag_key` for an `OpenFeature` context and records the evaluation event.
@@ -222,24 +248,17 @@ fn user_from_context(context: &EvaluationContext) -> EvaluationResult<FbUser> {
             )
         })?;
 
-    let mut name = String::new();
-    let mut custom = Vec::with_capacity(context.custom_fields.len());
+    let mut builder = FbUser::builder(key);
     for (field, value) in &context.custom_fields {
         let Some(text) = context_value_to_string(value) else {
-            log::debug!("ignoring unsupported structured OpenFeature context field {field:?}");
+            log::debug!("ignoring unsupported OpenFeature context field {field:?}");
             continue;
         };
         if field == "name" {
-            name = text;
+            builder = builder.name(text);
         } else {
-            custom.push((field.clone(), text));
+            builder = builder.custom(field.clone(), text);
         }
-    }
-    custom.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-
-    let mut builder = FbUser::builder(key).name(name);
-    for (field, value) in custom {
-        builder = builder.custom(field, value);
     }
     Ok(builder.build())
 }

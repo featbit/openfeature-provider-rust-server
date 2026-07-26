@@ -16,34 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Check coordinated core release availability
-        id: core-release
-        shell: bash
-        run: |
-          if cargo info featbit-server-sdk@0.1.0-beta.2 --registry crates-io > /dev/null 2>&1 &&
-             cargo info featbit-server-sdk-opentelemetry@0.1.0-beta.2 \
-               --registry crates-io > /dev/null 2>&1; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Check out coordinated core source
-        if: steps.core-release.outputs.available != 'true'
-        uses: actions/checkout@v5
-        with:
-          repository: featbit/featbit-rust-sdk
-          ref: edea4b3ee910e58d096b6d890ce012bd9087cec7
-          path: .ci/featbit-rust-sdk
-      - name: Configure coordinated core source
-        if: steps.core-release.outputs.available != 'true'
-        shell: bash
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          featbit-server-sdk = { path = ".ci/featbit-rust-sdk" }
-          featbit-server-sdk-opentelemetry = { path = ".ci/featbit-rust-sdk/integrations/opentelemetry" }
-          EOF
       - name: Install current toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
       - name: Check formatting
@@ -66,34 +38,6 @@ jobs:
         rust: [1.95.0, 1.96.0, 1.97.1]
     steps:
       - uses: actions/checkout@v5
-      - name: Check coordinated core release availability
-        id: core-release
-        shell: bash
-        run: |
-          if cargo info featbit-server-sdk@0.1.0-beta.2 --registry crates-io > /dev/null 2>&1 &&
-             cargo info featbit-server-sdk-opentelemetry@0.1.0-beta.2 \
-               --registry crates-io > /dev/null 2>&1; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Check out coordinated core source
-        if: steps.core-release.outputs.available != 'true'
-        uses: actions/checkout@v5
-        with:
-          repository: featbit/featbit-rust-sdk
-          ref: edea4b3ee910e58d096b6d890ce012bd9087cec7
-          path: .ci/featbit-rust-sdk
-      - name: Configure coordinated core source
-        if: steps.core-release.outputs.available != 'true'
-        shell: bash
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          featbit-server-sdk = { path = ".ci/featbit-rust-sdk" }
-          featbit-server-sdk-opentelemetry = { path = ".ci/featbit-rust-sdk/integrations/opentelemetry" }
-          EOF
       - name: Install Rust ${{ matrix.rust }}
         run: rustup toolchain install ${{ matrix.rust }} --profile minimal
       - name: Test supported toolchain

@@ -1,21 +1,22 @@
 # Releasing to crates.io
 
-The provider and core SDK are separate crates and repositories. Publish their coordinated
-prereleases in dependency order:
+The provider and core SDK are separate crates and repositories. For the initial provider release,
+the coordinated core crates are already published. Release in this order:
 
-1. Publish `featbit-server-sdk` and `featbit-server-sdk-opentelemetry` from
-   `featbit-rust-sdk`.
-2. Confirm the exact core versions are visible in the crates.io index.
-3. Generate `Cargo.lock` so the provider package resolves the published core versions, and run the
+1. Confirm the exact core versions are visible in the crates.io index.
+2. Generate `Cargo.lock` so the provider package resolves the published core versions, and run the
    full quality gate.
-4. Package and publish `featbit-openfeature-provider`.
+3. Package and publish `featbit-openfeature-provider`.
 
-For the initial repository split, the intended versions are:
+For future coordinated releases, publish `featbit-server-sdk` and any required integration crates
+before updating and publishing the provider.
+
+The initial versions are:
 
 | Crate | Version |
 | --- | --- |
-| `featbit-server-sdk` | `0.1.0-beta.2` |
-| `featbit-server-sdk-opentelemetry` | `0.1.0-beta.2` |
+| `featbit-server-sdk` | `0.1.1` |
+| `featbit-server-sdk-opentelemetry` | `0.1.1` |
 | `featbit-openfeature-provider` | `0.1.0-beta.1` |
 
 ## Verification
