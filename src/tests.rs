@@ -349,6 +349,27 @@ fn recursive_struct_conversion_accepts_supported_shapes_and_rejects_null() {
     assert!(json_to_struct(&serde_json::json!({"unsupported": null})).is_none());
 }
 
+#[test]
+fn structured_value_conversion_rejects_excessive_nesting() {
+    let mut open_feature_nested = Value::String("leaf".to_owned());
+    let mut json_nested = serde_json::Value::String("leaf".to_owned());
+    for _ in 0..=MAX_STRUCT_NESTING_DEPTH {
+        let mut parent = StructValue::default();
+        parent
+            .fields
+            .insert("nested".to_owned(), open_feature_nested);
+        open_feature_nested = Value::Struct(parent);
+        json_nested = serde_json::json!({"nested": json_nested});
+    }
+
+    let Value::Struct(open_feature_nested) = open_feature_nested else {
+        panic!("positive nesting depth should produce a structure");
+    };
+    assert!(open_feature_struct_to_json(&open_feature_nested).is_none());
+    assert!(!json_nesting_is_supported(&json_nested, 0));
+    assert!(json_to_struct(&json_nested).is_none());
+}
+
 fn provider_with_typed_values() -> FeatBitProvider {
     fn flag(key: &str, variation_type: &str, value: &str) -> serde_json::Value {
         serde_json::json!({

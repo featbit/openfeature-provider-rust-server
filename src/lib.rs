@@ -19,6 +19,9 @@ use featbit_server_sdk::{
     RawEvaluation,
 };
 
+// Bound adapter-owned recursion before traversing application or remote structured values.
+const MAX_STRUCT_NESTING_DEPTH: usize = 64;
+
 /// `FeatBit`'s direct implementation of the official `OpenFeature` Rust provider interface.
 ///
 /// The provider owns a cloneable [`FbClient`] handle. Register it with
@@ -273,17 +276,21 @@ fn context_value_to_string(value: &EvaluationContextFieldValue) -> Option<String
         EvaluationContextFieldValue::DateTime(value) => value
             .format(&time::format_description::well_known::Rfc3339)
             .ok(),
-        EvaluationContextFieldValue::Struct(value) => value
-            .as_ref()
-            .downcast_ref::<serde_json::Value>()
-            .and_then(|json| serde_json::to_string(json).ok())
-            .or_else(|| {
+        EvaluationContextFieldValue::Struct(value) => {
+            if let Some(json) = value.as_ref().downcast_ref::<serde_json::Value>() {
+                if json_nesting_is_supported(json, 0) {
+                    serde_json::to_string(json).ok()
+                } else {
+                    None
+                }
+            } else {
                 value
                     .as_ref()
                     .downcast_ref::<StructValue>()
                     .and_then(open_feature_struct_to_json)
                     .and_then(|json| serde_json::to_string(&json).ok())
-            }),
+            }
+        }
     }
 }
 
@@ -359,6 +366,13 @@ fn evaluation_error(code: EvaluationErrorCode, message: impl Into<String>) -> Ev
 }
 
 fn json_to_struct(value: &serde_json::Value) -> Option<StructValue> {
+    json_to_struct_at_depth(value, 0)
+}
+
+fn json_to_struct_at_depth(value: &serde_json::Value, depth: usize) -> Option<StructValue> {
+    if depth > MAX_STRUCT_NESTING_DEPTH {
+        return None;
+    }
     let serde_json::Value::Object(fields) = value else {
         return None;
     };
@@ -366,12 +380,15 @@ fn json_to_struct(value: &serde_json::Value) -> Option<StructValue> {
     for (key, value) in fields {
         result
             .fields
-            .insert(key.clone(), json_to_open_feature(value)?);
+            .insert(key.clone(), json_to_open_feature(value, depth + 1)?);
     }
     Some(result)
 }
 
-fn json_to_open_feature(value: &serde_json::Value) -> Option<Value> {
+fn json_to_open_feature(value: &serde_json::Value, depth: usize) -> Option<Value> {
+    if depth > MAX_STRUCT_NESTING_DEPTH {
+        return None;
+    }
     match value {
         serde_json::Value::Null => None,
         serde_json::Value::Bool(value) => Some(Value::Bool(*value)),
@@ -384,22 +401,35 @@ fn json_to_open_feature(value: &serde_json::Value) -> Option<Value> {
         serde_json::Value::String(value) => Some(Value::String(value.clone())),
         serde_json::Value::Array(values) => values
             .iter()
-            .map(json_to_open_feature)
+            .map(|value| json_to_open_feature(value, depth + 1))
             .collect::<Option<Vec<_>>>()
             .map(Value::Array),
-        serde_json::Value::Object(_) => json_to_struct(value).map(Value::Struct),
+        serde_json::Value::Object(_) => json_to_struct_at_depth(value, depth).map(Value::Struct),
     }
 }
 
 fn open_feature_struct_to_json(value: &StructValue) -> Option<serde_json::Value> {
+    open_feature_struct_to_json_at_depth(value, 0)
+}
+
+fn open_feature_struct_to_json_at_depth(
+    value: &StructValue,
+    depth: usize,
+) -> Option<serde_json::Value> {
+    if depth > MAX_STRUCT_NESTING_DEPTH {
+        return None;
+    }
     let mut object = serde_json::Map::with_capacity(value.fields.len());
     for (key, value) in &value.fields {
-        object.insert(key.clone(), open_feature_value_to_json(value)?);
+        object.insert(key.clone(), open_feature_value_to_json(value, depth + 1)?);
     }
     Some(serde_json::Value::Object(object))
 }
 
-fn open_feature_value_to_json(value: &Value) -> Option<serde_json::Value> {
+fn open_feature_value_to_json(value: &Value, depth: usize) -> Option<serde_json::Value> {
+    if depth > MAX_STRUCT_NESTING_DEPTH {
+        return None;
+    }
     match value {
         Value::Bool(value) => Some((*value).into()),
         Value::Int(value) => Some((*value).into()),
@@ -410,10 +440,25 @@ fn open_feature_value_to_json(value: &Value) -> Option<serde_json::Value> {
         Value::String(value) => Some(value.clone().into()),
         Value::Array(values) => values
             .iter()
-            .map(open_feature_value_to_json)
+            .map(|value| open_feature_value_to_json(value, depth + 1))
             .collect::<Option<Vec<_>>>()
             .map(serde_json::Value::Array),
-        Value::Struct(value) => open_feature_struct_to_json(value),
+        Value::Struct(value) => open_feature_struct_to_json_at_depth(value, depth),
+    }
+}
+
+fn json_nesting_is_supported(value: &serde_json::Value, depth: usize) -> bool {
+    if depth > MAX_STRUCT_NESTING_DEPTH {
+        return false;
+    }
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .all(|value| json_nesting_is_supported(value, depth + 1)),
+        serde_json::Value::Object(fields) => fields
+            .values()
+            .all(|value| json_nesting_is_supported(value, depth + 1)),
+        _ => true,
     }
 }
 #[cfg(test)]

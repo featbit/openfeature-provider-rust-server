@@ -28,6 +28,20 @@ const FULL: &str = r#"{
         "fallthrough":{"includedInExpt":false,"variations":[
             {"id":"enabled","rollout":[0,1],"exptRollout":0}
         ]}
+    },{
+        "id":"experiment-excluded-id","key":"test-","updatedAt":1,
+        "variationType":"boolean","variations":[{"id":"enabled","value":"true"}],
+        "targetUsers":[],"rules":[],"isEnabled":true,
+        "fallthrough":{"dispatchKey":"bucket","includedInExpt":true,"variations":[
+            {"id":"enabled","rollout":[0,1],"exptRollout":0.5}
+        ]}
+    },{
+        "id":"experiment-included-id","key":"test","updatedAt":1,
+        "variationType":"boolean","variations":[{"id":"enabled","value":"true"}],
+        "targetUsers":[],"rules":[],"isEnabled":true,
+        "fallthrough":{"dispatchKey":"bucket","includedInExpt":true,"variations":[
+            {"id":"enabled","rollout":[0,1],"exptRollout":0.6}
+        ]}
     }],"segments":[]}
 }"#;
 
@@ -304,6 +318,50 @@ async fn manual_exposure_tracking_is_delivered_and_large_events_are_bounded() {
 
     flush(&provider).await;
     assert_evaluation_and_metric(&next_event_batch(&mut events).await);
+
+    drop(open_feature);
+    api.shutdown().await;
+    close(&provider).await;
+    stop_servers(streaming, events).await;
+}
+
+#[tokio::test]
+async fn dotnet_experiment_dispatch_boundaries_survive_the_open_feature_event_path() {
+    let mut events = start_event_server().await;
+    let streaming = start_streaming_server().await;
+    let client = start_client(options(&streaming.url, &events.url, |builder| builder)).await;
+    let provider = FeatBitProvider::from_client(client);
+    let mut api = OpenFeature::default();
+    api.set_provider(provider.clone()).await;
+    let open_feature = api.create_client();
+
+    let excluded_context = EvaluationContext::default()
+        .with_targeting_key("experiment-user")
+        .with_custom_field("bucket", "value");
+    let included_context = EvaluationContext::default()
+        .with_targeting_key("experiment-user")
+        .with_custom_field("bucket", "-value");
+    assert!(open_feature
+        .get_bool_value("test-", Some(&excluded_context), None)
+        .await
+        .expect("excluded experiment evaluation should resolve"));
+    assert!(open_feature
+        .get_bool_value("test", Some(&included_context), None)
+        .await
+        .expect("included experiment evaluation should resolve"));
+
+    flush(&provider).await;
+    let batch = next_event_batch(&mut events).await;
+    assert_eq!(batch.len(), 2);
+    let experiment_decision = |flag_key: &str| {
+        batch
+            .iter()
+            .find(|event| event["variations"][0]["featureFlagKey"] == flag_key)
+            .and_then(|event| event["variations"][0]["sendToExperiment"].as_bool())
+            .expect("experiment evaluation event should be present")
+    };
+    assert!(!experiment_decision("test-"));
+    assert!(experiment_decision("test"));
 
     drop(open_feature);
     api.shutdown().await;
