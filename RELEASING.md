@@ -19,6 +19,38 @@ The initial versions are:
 | `featbit-server-sdk-opentelemetry` | `0.1.1` |
 | `featbit-openfeature-provider` | `0.1.0-beta.1` |
 
+## Automated release
+
+The [`Release`](.github/workflows/release.yml) workflow publishes the crate and creates a GitHub
+Release. It is started manually with a SemVer version input and is restricted to the `main` branch.
+The input does not edit or commit project files: it must exactly match the version already committed
+in `Cargo.toml`.
+
+Before running it:
+
+1. Update the package version in `Cargo.toml`, refresh `Cargo.lock`, and merge the reviewed change
+   into `main`.
+2. Create a protected GitHub Environment named `release`. Restrict its deployment branch to `main`
+   and configure required reviewers if appropriate.
+3. On crates.io, configure a GitHub Trusted Publisher for:
+   - Repository owner: `featbit`
+   - Repository name: `openfeature-provider-rust-server`
+   - Workflow file: `release.yml`
+   - Environment: `release`
+4. In GitHub, open **Actions > Release > Run workflow**, select `main`, and enter the version without
+   a leading `v`.
+
+The workflow verifies the version and tag, runs the complete quality gate, publishes through a
+short-lived crates.io OIDC token, and then creates a `v<VERSION>` GitHub Release. Versions containing
+a SemVer pre-release suffix, such as `0.1.0-beta.1`, are marked as pre-releases.
+
+crates.io requires the first version of a new crate to be published manually before a Trusted
+Publisher can be configured. For that one-time bootstrap, run the verification commands below and
+then run `cargo publish --locked` locally with an owner token. Do not create the Git tag yet. After
+configuring Trusted Publishing, run the workflow with the same version; it detects the existing
+crate version, skips the upload, and creates the GitHub Release. Do not store that bootstrap token
+in the repository or as a long-lived GitHub secret.
+
 ## Verification
 
 From a clean, reviewed checkout:
@@ -46,5 +78,5 @@ a new version:
 cargo yank --version <VERSION> featbit-openfeature-provider
 ```
 
-The repository does not store a long-lived crates.io token. Configure crates.io Trusted Publishing
-and a protected GitHub Environment before adding automated publication.
+The repository does not store a long-lived crates.io token. Automated releases use crates.io
+Trusted Publishing and the protected `release` GitHub Environment.
