@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: SemVer from Cargo.toml, without the leading "v"
+        description: SemVer to write to Cargo.toml, without the leading "v"
         required: true
         type: string
 
@@ -24,10 +24,13 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify release
+    name: Prepare and verify release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       prerelease: ${{ steps.release.outputs.prerelease }}
+      sha: ${{ steps.commit.outputs.sha }}
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
     steps:
@@ -52,38 +55,142 @@ jobs:
             exit 1
           fi
 
-          manifest_version="$(
-            cargo "+${RUST_VERSION}" metadata --locked --no-deps --format-version 1 |
-              jq -r --arg package "$PACKAGE_NAME" \
-                '.packages[] | select(.name == $package) | .version'
-          )"
-
-          if [[ -z "$manifest_version" ]]; then
-            echo "::error::Package ${PACKAGE_NAME} was not found in Cargo metadata."
+          semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$RELEASE_VERSION" =~ $semver_pattern ]]; then
+            echo "::error::Requested version ${RELEASE_VERSION} is not a valid SemVer without a leading v."
             exit 1
           fi
 
-          if [[ "$RELEASE_VERSION" != "$manifest_version" ]]; then
-            echo "::error::Requested version ${RELEASE_VERSION} does not match Cargo.toml version ${manifest_version}."
-            exit 1
-          fi
-
-          tag="v${manifest_version}"
+          tag="v${RELEASE_VERSION}"
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
             echo "::error::Tag ${tag} already exists."
             exit 1
           fi
 
           prerelease=false
-          if [[ "$manifest_version" == *-* ]]; then
+          version_without_build="${RELEASE_VERSION%%+*}"
+          if [[ "$version_without_build" == *-* ]]; then
             prerelease=true
           fi
 
           {
             echo "prerelease=${prerelease}"
             echo "tag=${tag}"
-            echo "version=${manifest_version}"
+            echo "version=${RELEASE_VERSION}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Update Cargo package version
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_version="$(
+            cargo "+${RUST_VERSION}" metadata --locked --no-deps --format-version 1 |
+              jq -r --arg package "$PACKAGE_NAME" \
+                '.packages[] | select(.name == $package) | .version'
+          )"
+
+          if [[ -z "$current_version" ]]; then
+            echo "::error::Package ${PACKAGE_NAME} was not found in Cargo metadata."
+            exit 1
+          fi
+
+          echo "Updating ${PACKAGE_NAME} from ${current_version} to ${RELEASE_VERSION}."
+
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          manifest_path = Path("Cargo.toml")
+          manifest = manifest_path.read_bytes().decode("utf-8")
+          package_name = os.environ["PACKAGE_NAME"]
+          version = os.environ["RELEASE_VERSION"]
+
+          package_header = re.search(r"(?m)^\[package\][ \t]*\r?$", manifest)
+          if package_header is None:
+              raise SystemExit("Cargo.toml does not contain a [package] table")
+
+          section_start = package_header.end()
+          next_header = re.search(r"(?m)^\[", manifest[section_start:])
+          section_end = (
+              section_start + next_header.start()
+              if next_header is not None
+              else len(manifest)
+          )
+          package_section = manifest[section_start:section_end]
+          version_line = re.compile(
+              r'(?m)^(version[ \t]*=[ \t]*")[^"\r\n]+(".*)$'
+          )
+          updated_section, replacements = version_line.subn(
+              lambda match: f"{match.group(1)}{version}{match.group(2)}",
+              package_section,
+              count=1,
+          )
+          if replacements != 1:
+              raise SystemExit("Cargo.toml [package] table must contain one version")
+
+          updated_manifest = (
+              manifest[:section_start] + updated_section + manifest[section_end:]
+          )
+          if updated_manifest != manifest:
+              manifest_path.write_bytes(updated_manifest.encode("utf-8"))
+
+          lock_path = Path("Cargo.lock")
+          lockfile = lock_path.read_bytes().decode("utf-8")
+          package_blocks = list(
+              re.finditer(
+                  r"(?ms)^\[\[package\]\][ \t]*\r?\n.*?(?=^\[\[package\]\]|\Z)",
+                  lockfile,
+              )
+          )
+          matching_blocks = [
+              block
+              for block in package_blocks
+              if re.search(
+                  rf'(?m)^name[ \t]*=[ \t]*"{re.escape(package_name)}"[ \t]*\r?$',
+                  block.group(0),
+              )
+          ]
+          if len(matching_blocks) != 1:
+              raise SystemExit(
+                  f"Cargo.lock must contain one package named {package_name}"
+              )
+
+          lock_block = matching_blocks[0]
+          updated_lock_block, replacements = version_line.subn(
+              lambda match: f"{match.group(1)}{version}{match.group(2)}",
+              lock_block.group(0),
+              count=1,
+          )
+          if replacements != 1:
+              raise SystemExit(
+                  f"Cargo.lock package {package_name} must contain one version"
+              )
+
+          updated_lockfile = (
+              lockfile[:lock_block.start()]
+              + updated_lock_block
+              + lockfile[lock_block.end():]
+          )
+          if updated_lockfile != lockfile:
+              lock_path.write_bytes(updated_lockfile.encode("utf-8"))
+          PY
+
+          manifest_version="$(
+            cargo "+${RUST_VERSION}" metadata --locked --no-deps --format-version 1 |
+              jq -r --arg package "$PACKAGE_NAME" \
+                '.packages[] | select(.name == $package) | .version'
+          )"
+          if [[ "$manifest_version" != "$RELEASE_VERSION" ]]; then
+            echo "::error::Cargo metadata reports ${manifest_version}, expected ${RELEASE_VERSION}."
+            exit 1
+          fi
+
+          git diff --check
+          git diff -- Cargo.toml Cargo.lock
 
       - name: Check formatting
         run: cargo "+${RUST_VERSION}" fmt --all -- --check
@@ -102,11 +209,31 @@ jobs:
 
       - name: Inspect package contents and duplicate dependencies
         run: |
-          cargo "+${RUST_VERSION}" package --list --locked
+          cargo "+${RUST_VERSION}" package --list --locked --allow-dirty
           cargo "+${RUST_VERSION}" tree -d
 
       - name: Verify publish package
-        run: cargo "+${RUST_VERSION}" publish --dry-run --locked
+        run: cargo "+${RUST_VERSION}" publish --dry-run --locked --allow-dirty
+
+      - name: Commit and push version bump
+        id: commit
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- Cargo.toml Cargo.lock; then
+            echo "Cargo.toml and Cargo.lock already contain ${RELEASE_VERSION}; no version commit is needed."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git commit -m "chore: prepare v${RELEASE_VERSION}"
+            git push origin HEAD:main
+          fi
+
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish release
@@ -119,6 +246,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
 
       - name: Install release toolchain
         run: rustup toolchain install "$RUST_VERSION" --profile minimal
@@ -170,6 +299,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           IS_PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          RELEASE_SHA: ${{ needs.verify.outputs.sha }}
           RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         shell: bash
         run: |
@@ -177,7 +307,7 @@ jobs:
 
           release_args=(
             "$RELEASE_TAG"
-            --target "$GITHUB_SHA"
+            --target "$RELEASE_SHA"
             --title "$RELEASE_TAG"
             --generate-notes
           )

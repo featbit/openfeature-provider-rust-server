@@ -23,26 +23,29 @@ The initial versions are:
 
 The [`Release`](.github/workflows/release.yml) workflow publishes the crate and creates a GitHub
 Release. It is started manually with a SemVer version input and is restricted to the `main` branch.
-The input does not edit or commit project files: it must exactly match the version already committed
-in `Cargo.toml`.
+The workflow writes the input version to `Cargo.toml`, refreshes the root package entry in
+`Cargo.lock`, runs the complete quality gate, and commits the version bump back to `main` before
+publishing.
 
 Before running it:
 
-1. Update the package version in `Cargo.toml`, refresh `Cargo.lock`, and merge the reviewed change
-   into `main`.
-2. Create a protected GitHub Environment named `release`. Restrict its deployment branch to `main`
+1. Ensure the dependency versions and release contents already on `main` are ready to publish.
+2. In **Settings > Actions > General**, allow workflows to use read and write permissions so the
+   release workflow can commit its version bump to `main`.
+3. Create a protected GitHub Environment named `release`. Restrict its deployment branch to `main`
    and configure required reviewers if appropriate.
-3. On crates.io, configure a GitHub Trusted Publisher for:
+4. On crates.io, configure a GitHub Trusted Publisher for:
    - Repository owner: `featbit`
    - Repository name: `openfeature-provider-rust-server`
    - Workflow file: `release.yml`
    - Environment: `release`
-4. In GitHub, open **Actions > Release > Run workflow**, select `main`, and enter the version without
-   a leading `v`.
+5. In GitHub, open **Actions > Release > Run workflow**, select `main`, and enter the new version
+   without a leading `v`. No local version edit or version-bump push is needed.
 
-The workflow verifies the version and tag, runs the complete quality gate, publishes through a
-short-lived crates.io OIDC token, and then creates a `v<VERSION>` GitHub Release. Versions containing
-a SemVer pre-release suffix, such as `0.1.0-beta.1`, are marked as pre-releases.
+The workflow validates the requested version and tag, updates the Cargo files, runs the complete
+quality gate, pushes a `chore: prepare v<VERSION>` commit, publishes that exact commit through a
+short-lived crates.io OIDC token, and then creates a `v<VERSION>` GitHub Release. Versions
+containing a SemVer pre-release suffix, such as `0.1.0-beta.1`, are marked as pre-releases.
 
 crates.io requires the first version of a new crate to be published manually before a Trusted
 Publisher can be configured. For that one-time bootstrap, run the verification commands below and
