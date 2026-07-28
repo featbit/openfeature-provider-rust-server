@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "featbit-openfeature-provider"
-version = "0.1.0-beta.2"
+version = "0.1.1-beta.1"
 dependencies = [
  "axum",
  "env_logger",
