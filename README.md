@@ -10,28 +10,15 @@ The provider implements the official OpenFeature Rust interface and delegates fl
 one shared FeatBit `FbClient`. Synchronization, local evaluation, analytics, and lifecycle remain
 owned by the core SDK.
 
-## Get Started
+## Quick Start
 
-### Installation
+### 1. Install
 
-The provider has not yet been published to crates.io. Until the first release, use the repository
-source with FeatBit Rust SDK `0.1.1` and OpenFeature Rust SDK `0.3.0`:
-
-```toml
-[dependencies]
-featbit-openfeature-provider = {
-    git = "https://github.com/featbit/openfeature-provider-rust-server",
-    branch = "main"
-}
-featbit-server-sdk = "0.1.1"
-open-feature = "=0.3.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```shell
+cargo add featbit-openfeature-provider@0.1.1
 ```
 
-The Cargo packages are imported as `featbit_openfeature_provider`, `featbit_server_sdk`, and
-`open_feature`.
-
-### Prerequisite
+### 2. Configure
 
 Before using the provider, obtain the environment secret and SDK URLs:
 
@@ -41,28 +28,27 @@ Before using the provider, obtain the environment secret and SDK URLs:
 Use `wss://` and `https://` endpoints in production. Keep the environment secret on trusted
 server-side infrastructure.
 
-### Quick Start
+### 3. Evaluate a Flag
 
 ```rust,no_run
 use featbit_openfeature_provider::FeatBitProvider;
-use featbit_server_sdk::{FbClient, FbOptions};
 use open_feature::{EvaluationContext, OpenFeature};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let options = FbOptions::builder(std::env::var("FEATBIT_ENV_SECRET")?)
-        .streaming_url(std::env::var("FEATBIT_STREAMING_URL")?)
-        .event_url(std::env::var("FEATBIT_EVENT_URL")?)
-        .build()?;
+    let environment_secret = std::env::var("FEATBIT_ENV_SECRET")?;
+    let streaming_url = std::env::var("FEATBIT_STREAMING_URL")?;
+    let event_url = std::env::var("FEATBIT_EVENT_URL")?;
 
     // Construction can perform a bounded initial wait.
-    let featbit =
-        tokio::task::spawn_blocking(move || FbClient::with_options(options)).await?;
-    let provider = FeatBitProvider::from_client(featbit.clone());
+    let provider = tokio::task::spawn_blocking(move || {
+        FeatBitProvider::from_endpoints(environment_secret, streaming_url, event_url)
+    })
+    .await??;
 
     let client = {
         let mut api = OpenFeature::singleton_mut().await;
-        api.set_provider(provider.clone()).await;
+        api.set_provider(provider).await;
         api.create_client()
     };
 
@@ -79,13 +65,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Run the new code path.
     }
 
+    drop(client);
     OpenFeature::singleton_mut().await.shutdown().await;
-    tokio::task::spawn_blocking(move || featbit.close()).await?;
     Ok(())
 }
 ```
 
-### Notes
+## Behavior
 
 - OpenFeature `targeting_key` is the required FeatBit user key; custom `name` becomes the FeatBit
   user name.
@@ -97,10 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   OpenFeature errors.
 - Struct flags require a top-level JSON object and reject `null`, nested `null`, and non-finite
   values.
-- `NotReady`, `Ready`, `Stale`, and terminal `Error` status are preserved. Shut down OpenFeature
-  before explicitly closing the shared `FbClient`.
+- `NotReady`, `Ready`, `Stale`, and terminal `Error` status are preserved. Drop application clients
+  and shut down OpenFeature to release the provider and its synchronization worker.
 
-### Examples
+## Examples
 
 - [OpenFeature-only standalone application](examples/openfeature-only/README.md):
   `cargo run --manifest-path examples/openfeature-only/Cargo.toml -- <flag-key>`
