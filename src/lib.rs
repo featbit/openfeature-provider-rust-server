@@ -34,6 +34,28 @@ pub struct FeatBitProvider {
 }
 
 impl FeatBitProvider {
+    /// Starts a provider with an environment secret and the two standard `FeatBit` service
+    /// endpoints.
+    ///
+    /// This convenience keeps application crates that only need the standard connection settings
+    /// from depending directly on `featbit-server-sdk`. Use [`Self::new`] with [`FbOptions`] when
+    /// advanced SDK configuration is required.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error when the secret or either endpoint is invalid.
+    pub fn from_endpoints(
+        env_secret: impl Into<String>,
+        streaming_url: impl Into<String>,
+        event_url: impl Into<String>,
+    ) -> Result<Self, featbit_server_sdk::ConfigError> {
+        let options = FbOptions::builder(env_secret)
+            .streaming_url(streaming_url)
+            .event_url(event_url)
+            .build()?;
+        Ok(Self::new(options))
+    }
+
     /// Starts a provider from validated `FeatBit` options.
     #[must_use]
     pub fn new(options: FbOptions) -> Self {

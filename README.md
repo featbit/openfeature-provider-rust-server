@@ -102,6 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 ### Examples
 
+- [OpenFeature-only standalone application](examples/openfeature-only/README.md):
+  `cargo run --manifest-path examples/openfeature-only/Cargo.toml -- <flag-key>`
 - [Console application](examples/console.rs): `cargo run --example console`
 - [Axum application](examples/axum.rs): `cargo run --example axum`
 - [Bounded FeatBit Cloud stress test](examples/test/README.md):

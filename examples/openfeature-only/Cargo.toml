@@ -1,0 +1,11 @@
+[package]
+name = "openfeature-only-example"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95.0"
+publish = false
+
+[dependencies]
+featbit-openfeature-provider = { path = "../.." }
+open-feature = "=0.3.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
