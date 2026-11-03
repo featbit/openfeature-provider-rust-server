@@ -15,7 +15,7 @@ owned by the core SDK.
 ### 1. Install
 
 ```shell
-cargo add featbit-openfeature-provider@0.1.1
+cargo add featbit-openfeature-provider@0.2.0
 ```
 
 ### 2. Configure
