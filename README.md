@@ -153,7 +153,7 @@ For every other non-OpenFeature capability, see the
 | --- | --- |
 | Rust edition | 2021 |
 | Rust toolchain | 1.95.0, 1.96.0, and 1.97.x |
-| FeatBit Rust SDK | `0.1.1` |
+| FeatBit Rust SDK | `0.2.0` |
 | `open-feature` | exactly `0.3.0` |
 
 Stable Rust only is supported.
