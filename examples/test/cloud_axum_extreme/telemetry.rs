@@ -83,12 +83,9 @@ impl Logger for TestOtelLogger {
             attribute_string(&record.attributes, "feature_flag.provider.name") == Some("FeatBit");
         let reason_valid =
             attribute_string(&record.attributes, "feature_flag.result.reason").is_some();
-        let experiment_valid = matches!(
-            record
-                .attributes
-                .get("featbit.evaluation.send_to_experiment"),
-            Some(AnyValue::Boolean(_))
-        );
+        let experiment_valid = !record
+            .attributes
+            .contains_key("featbit.evaluation.send_to_experiment");
 
         let flag_key = attribute_string(&record.attributes, "feature_flag.key");
         if let Some(flag_key) = flag_key {

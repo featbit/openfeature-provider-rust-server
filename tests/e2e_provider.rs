@@ -326,7 +326,7 @@ async fn manual_exposure_tracking_is_delivered_and_large_events_are_bounded() {
 }
 
 #[tokio::test]
-async fn dotnet_experiment_dispatch_boundaries_survive_the_open_feature_event_path() {
+async fn legacy_experiment_metadata_is_ignored_in_open_feature_events() {
     let mut events = start_event_server().await;
     let streaming = start_streaming_server().await;
     let client = start_client(options(&streaming.url, &events.url, |builder| builder)).await;
@@ -353,15 +353,13 @@ async fn dotnet_experiment_dispatch_boundaries_survive_the_open_feature_event_pa
     flush(&provider).await;
     let batch = next_event_batch(&mut events).await;
     assert_eq!(batch.len(), 2);
-    let experiment_decision = |flag_key: &str| {
-        batch
+    for flag_key in ["test-", "test"] {
+        let variation = &batch
             .iter()
             .find(|event| event["variations"][0]["featureFlagKey"] == flag_key)
-            .and_then(|event| event["variations"][0]["sendToExperiment"].as_bool())
-            .expect("experiment evaluation event should be present")
-    };
-    assert!(!experiment_decision("test-"));
-    assert!(experiment_decision("test"));
+            .expect("evaluation event should be present")["variations"][0];
+        assert!(variation.get("sendToExperiment").is_none());
+    }
 
     drop(open_feature);
     api.shutdown().await;

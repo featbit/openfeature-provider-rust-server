@@ -1,6 +1,6 @@
 [package]
 name = "featbit-openfeature-provider"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.95.0"
 authors = ["FeatBit"]
@@ -21,7 +21,7 @@ name = "provider_hot_path"
 harness = false
 
 [dependencies]
-featbit-server-sdk = "0.2.0"
+featbit-server-sdk = "0.2.1"
 log = "0.4"
 # open-feature 0.3.0 references its log and mock exports unconditionally, so its default features
 # cannot currently be disabled even though this provider does not use the mock API at runtime.
@@ -32,7 +32,7 @@ time = { version = "0.3", features = ["formatting"] }
 [dev-dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "tracing"] }
 env_logger = "0.11"
-featbit-server-sdk-opentelemetry = "0.2.0"
+featbit-server-sdk-opentelemetry = "0.2.1"
 futures-util = { version = "0.3", features = ["sink"] }
 opentelemetry = { version = "0.32", default-features = false, features = ["logs"] }
 rand = "0.9"
