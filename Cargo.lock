@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "featbit-openfeature-provider"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "env_logger",
@@ -430,9 +430,9 @@ dependencies = [
 
 [[package]]
 name = "featbit-server-sdk"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "737d390943d8c083e8d5cbc9221bd950b8d4420f3ca01f0c2cc69af264583100"
+checksum = "da3c9eea33d861a01946d2c9bd30be8028c61f0e125ec86ac00c5ce6efc14f62"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -455,9 +455,9 @@ dependencies = [
 
 [[package]]
 name = "featbit-server-sdk-opentelemetry"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd814c7e229bb78a234d522c3618ad6d43e47346a3c1ab6d8d156ee9395954e4"
+checksum = "beeca8ad1465890cd0a61ae24cd3d7ff6fab1bedfbc6396c53420cf1ae1e9039"
 dependencies = [
  "featbit-server-sdk",
  "opentelemetry",

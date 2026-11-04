@@ -500,7 +500,7 @@ async fn observer_records_open_feature_context_and_conversion_errors() {
 fn provider_tracking_extensions_use_open_feature_context_validation() {
     let provider = provider();
     let missing_context = EvaluationContext::default();
-    let retained_event = FbEvaluationEvent::new("enabled", "on", "true", false, true);
+    let retained_event = FbEvaluationEvent::new("enabled", "on", "true", true);
     let retained_error = provider
         .track_eval_event(&missing_context, &retained_event)
         .expect_err("retained evaluation tracking requires a targeting key");
@@ -638,7 +638,7 @@ async fn closed_provider_reports_error_and_rejects_resolution() {
     assert_eq!(provider.status(), ProviderStatus::Error);
 
     let context = EvaluationContext::default().with_targeting_key("user-1");
-    let retained_event = FbEvaluationEvent::new("enabled", "on", "true", false, true);
+    let retained_event = FbEvaluationEvent::new("enabled", "on", "true", true);
     assert_eq!(
         provider.track_eval_event(&context, &retained_event),
         Ok(false)

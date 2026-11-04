@@ -15,7 +15,7 @@ owned by the core SDK.
 ### 1. Install
 
 ```shell
-cargo add featbit-openfeature-provider@0.2.0
+cargo add featbit-openfeature-provider@0.2.1
 ```
 
 ### 2. Configure
@@ -153,7 +153,7 @@ For every other non-OpenFeature capability, see the
 | --- | --- |
 | Rust edition | 2021 |
 | Rust toolchain | 1.95.0, 1.96.0, and 1.97.x |
-| FeatBit Rust SDK | `0.2.0` |
+| FeatBit Rust SDK | `0.2.1` |
 | `open-feature` | exactly `0.3.0` |
 
 Stable Rust only is supported.
